@@ -2,7 +2,7 @@
 
 Run barnaby on an Android phone with Termux and the Termux:API app. No laptop.
 
-- `bear.sh`: one-file menu. It installs packages, gets this branch, applies a camera patch (`--source termux:ID`), and runs the bear live or on a recorded video.
+- `bear.sh`: one-file menu. It installs packages, gets this branch, applies a camera patch (`--source termux:ID`), checks which way the camera frame is turned (finger test), and runs the bear live or on a recorded video.
 - `probe.sh`: a read-only phone check. It copies a report to the clipboard.
 - `PHONE-CAM-SPEC.md`: the phone cameras compared with the Pi camera.
 
