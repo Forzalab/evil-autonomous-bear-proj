@@ -11,6 +11,7 @@ class PerceptionEvent:
     hand_confidence: float
     face_confidence: float
     inference_ms: float
+    expression_confidence: float = 0.0  # softmax of `expression`; face_confidence is only the detector score
 
 
 def on_perception(event: PerceptionEvent) -> None:

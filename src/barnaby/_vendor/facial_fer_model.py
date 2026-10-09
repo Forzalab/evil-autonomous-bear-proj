@@ -57,6 +57,13 @@ class FacialExpressionRecog:
 
         return results
 
+    def infer_proba(self, image, bbox=None):
+        """Barnaby addition: softmax probabilities (7,) instead of argmax only."""
+        self._model.setInput(self._preprocess(image, bbox), self._inputNames)
+        logits = np.asarray(self._model.forward(self._outputNames)[0], np.float64).ravel()
+        e = np.exp(logits - logits.max())
+        return e / e.sum()
+
     def _postprocess(self, outputBlob):
         result = np.argmax(outputBlob[0], axis=1).astype(np.uint8)
         return result

@@ -33,6 +33,9 @@ def classify_gesture(points: np.ndarray) -> str:
         return "peace"
     if fingers == [True, False, False, False]:
         return "pointing"
+    if fingers == [False, True, False, False]:
+        # Thumb is ignored: people flip the bird with it tucked or sticking out.
+        return "middle_finger"
     if not any(fingers):
         palm_size = float(np.linalg.norm(points[0] - points[9]))
         upward = points[2, 1] - points[4, 1]

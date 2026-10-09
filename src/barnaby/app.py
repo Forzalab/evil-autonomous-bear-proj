@@ -11,7 +11,7 @@ from .camera import Camera
 from .gestures import HAND_CONNECTIONS, StableLabel
 from .models import DEFAULT_MODEL_DIR
 from .reactions import PerceptionEvent, on_perception
-from .trigger import OneShot
+from .trigger import ANY, OneShot
 from .vision import Observation, Vision
 
 
@@ -36,6 +36,13 @@ def overlay(frame, observation: Observation, gesture: str, expression: str):
     cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 240, 255), 1, cv2.LINE_AA)
 
 
+def unit_interval(value: str) -> float:
+    number = float(value)
+    if not 0.0 <= number <= 1.0:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return number
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", default="0", help="USB camera index or video path")
@@ -52,8 +59,15 @@ def main(argv=None) -> None:
     parser.add_argument("--realtime", action="store_true", help="Play a video at its source frame rate")
     parser.add_argument("--loop", action="store_true", help="Repeat a video until Q or Ctrl+C")
     parser.add_argument("--save-video", type=Path, help="Write an annotated MP4, including in headless mode")
-    parser.add_argument("--trigger", metavar="GESTURE", help="Print 'BEAR: dance' once per shown GESTURE (off by default)")
+    parser.add_argument("--trigger", metavar="GESTURE", help="Print 'BEAR: dance' once per shown GESTURE (off by default); "
+                        "'any' = any detected hand, re-firing every cooldown while hands stay up")
     parser.add_argument("--trigger-cooldown", type=float, default=20.0, help="Seconds between triggers (one bear dance)")
+    tune = parser.add_argument_group("detection tolerances (lower = more hands/faces found, more false ones)")
+    tune.add_argument("--palm-threshold", type=unit_interval, default=0.65, help="Palm detector min score")
+    tune.add_argument("--palm-nms", type=unit_interval, default=0.3, help="Palm box overlap (IoU) merge threshold")
+    tune.add_argument("--hand-threshold", type=unit_interval, default=0.8, help="Hand landmark min confidence")
+    tune.add_argument("--face-threshold", type=unit_interval, default=0.8, help="Face detector min score")
+    tune.add_argument("--face-nms", type=unit_interval, default=0.3, help="Face box overlap (IoU) merge threshold")
     parser.add_argument("--check", action="store_true", help="Verify weights and run all models without a camera")
     args = parser.parse_args(argv)
     if not math.isfinite(args.interval) or args.interval < 0:
@@ -64,7 +78,8 @@ def main(argv=None) -> None:
     camera = None
     writer = None
     try:
-        vision = Vision(args.model_dir, args.threads)
+        vision = Vision(args.model_dir, args.threads, args.palm_threshold, args.palm_nms,
+                        args.hand_threshold, args.face_threshold, args.face_nms)
         if args.check:
             vision.check()
             print(f"All four models verified and ran on CPU (OpenCV {cv2.__version__}).")
@@ -72,7 +87,11 @@ def main(argv=None) -> None:
         camera = Camera(args.source, args.width, args.height, args.picamera, args.realtime, args.loop)
         gesture_filter, expression_filter = StableLabel(args.stable_frames), StableLabel(args.stable_frames)
         previous = ("none", "none")
-        trigger = OneShot(args.trigger, args.trigger_cooldown) if args.trigger else None
+        trigger = None
+        if args.trigger == ANY:
+            trigger = OneShot(ANY, args.trigger_cooldown, rearm_s=0.0, repeat_while_held=True)
+        elif args.trigger:
+            trigger = OneShot(args.trigger, args.trigger_cooldown)
         count, next_inference = 0, 0.0
         observation = Observation()
         print("Barnaby vision running. Press Q in the preview or Ctrl+C to stop.")
@@ -94,13 +113,15 @@ def main(argv=None) -> None:
                 observation = vision.infer(small)
                 next_inference = now + args.interval
                 labels = (gesture_filter.update(observation.gesture), expression_filter.update(observation.expression))
+                event = PerceptionEvent(*labels, observation.hand_confidence,
+                                        observation.face_confidence, observation.inference_ms,
+                                        round(observation.expression_confidence, 3))
                 if labels != previous:
-                    event = PerceptionEvent(*labels, observation.hand_confidence,
-                                            observation.face_confidence, observation.inference_ms)
                     on_perception(event)
-                    if trigger and trigger.feed(event, now):
-                        print("BEAR: dance", flush=True)
                     previous = labels
+                # Fed every inference (not only on changes) so a held hand can re-fire after the cooldown.
+                if trigger and trigger.feed(event, now):
+                    print("BEAR: dance", flush=True)
             if not args.headless or args.save_video:
                 overlay(small, observation, gesture_filter.value, expression_filter.value)
             if args.save_video:

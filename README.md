@@ -92,6 +92,6 @@ If dependencies changed, repeat the install command for your environment.
 - `src/barnaby/gestures.py`: change the gesture rules.
 - `src/barnaby/vision.py`: change model inference.
 
-The current gestures are open palm, fist, peace, pointing, and thumbs up.
+The current gestures are open palm, fist, peace, pointing, middle finger, and thumbs up.
 Expression labels describe facial appearance. Motion gestures such as waving
 are not implemented yet.
