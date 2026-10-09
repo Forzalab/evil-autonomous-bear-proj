@@ -23,6 +23,8 @@ export DEBIAN_FRONTEND=noninteractive GIT_TERMINAL_PROMPT=0
 
 ok()   { echo "OK: $*"; }
 fail() { echo "FAIL: $*"; return 1; }
+buzz() { timeout 10 termux-vibrate -d "$1" >/dev/null 2>&1; }
+buzz_fail() { local i; for i in 1 2 3; do buzz 150; sleep 0.4; done; }
 pause() { read -r -p "Push Enter for the menu. " _ || exit 0; }
 stamp() { date +%Y%m%d-%H%M%S; }
 
@@ -70,10 +72,10 @@ need_bear() {  # The code and Python packages must be there.
 write_patch() {
 cat <<'BEAR_PATCH_END'
 diff --git a/src/barnaby/app.py b/src/barnaby/app.py
-index d5b740a..8b9b57b 100644
+index 70a74aa..6b13a76 100644
 --- a/src/barnaby/app.py
 +++ b/src/barnaby/app.py
-@@ -38,7 +38,7 @@ def overlay(frame, observation: Observation, gesture: str, expression: str):
+@@ -45,7 +45,7 @@ def unit_interval(value: str) -> float:
  
  def main(argv=None) -> None:
      parser = argparse.ArgumentParser(description=__doc__)
@@ -82,7 +84,7 @@ index d5b740a..8b9b57b 100644
      parser.add_argument("--picamera", action="store_true", help="Use a Pi CSI camera via Picamera2")
      parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
      parser.add_argument("--width", type=positive, default=640)
-@@ -58,7 +58,7 @@ def main(argv=None) -> None:
+@@ -72,7 +72,7 @@ def main(argv=None) -> None:
      args = parser.parse_args(argv)
      if not math.isfinite(args.interval) or args.interval < 0:
          parser.error("--interval must be finite and nonnegative")
@@ -92,10 +94,10 @@ index d5b740a..8b9b57b 100644
              parser.error("--save-video must differ from the input video")
      camera = None
 diff --git a/src/barnaby/camera.py b/src/barnaby/camera.py
-index d5ec0f8..6a19a26 100644
+index d5ec0f8..2b27377 100644
 --- a/src/barnaby/camera.py
 +++ b/src/barnaby/camera.py
-@@ -1,24 +1,136 @@
+@@ -1,24 +1,139 @@
 -"""USB/video input on either machine, or optional Picamera2 CSI input on the Pi."""
 +"""USB/video input on either machine, optional Picamera2 CSI input on the Pi,
 +or an Android phone camera from Termux via Termux:API (--source termux:0)."""
@@ -139,6 +141,8 @@ index d5ec0f8..6a19a26 100644
 +    if frame is None:
 +        return None
 +    rotate, mirror = photo_turn() if turn is None else turn
++    global last_photo  # TEMP debug for BEAR_DEBUG=1 events (reactions.py)
++    last_photo = {"raw_wh": f"{frame.shape[1]}x{frame.shape[0]}", "rotate": rotate, "mirror": int(mirror)}
 +    if mirror:
 +        frame = cv2.flip(frame, 1)
 +    if rotate == 180:
@@ -161,6 +165,7 @@ index d5ec0f8..6a19a26 100644
 +
 +
 +_portrait_warned = _turn_warned = False
++last_photo = None
 +
 +
 +class TermuxCamera:
@@ -235,7 +240,7 @@ index d5ec0f8..6a19a26 100644
              try:
                  from picamera2 import Picamera2
              except ImportError as error:
-@@ -50,6 +162,8 @@ class Camera:
+@@ -50,6 +165,8 @@ class Camera:
          self.looped = False
          if self._pi is not None:
              return True, self._pi.capture_array("main")
@@ -244,7 +249,7 @@ index d5ec0f8..6a19a26 100644
          if self.realtime and self._next_frame_at is not None:
              time.sleep(max(0.0, self._next_frame_at - time.monotonic()))
          ok, frame = self._capture.read()
-@@ -66,7 +180,9 @@ class Camera:
+@@ -66,7 +183,9 @@ class Camera:
          return ok, frame
  
      def close(self):
@@ -409,7 +414,8 @@ def main(out_path, paths):
         lines.append(f"{i}: finger image-{direction} ({angle:.0f} deg), hand looks "
                      f"{votes[-1][3]} ({score:.2f}) -> ROTATE={rotate} MIRROR={mirror}")
     best = Counter(votes).most_common(1)
-    if best and best[0][1] >= 3:
+    need = len(paths) // 2 + 1  # most photos must agree: 3 of 5, 2 of 2
+    if best and best[0][1] >= need:
         (rotate, mirror, direction, looks), count = best[0]
         summary = (f"Finger points image-{direction}, hand looks {looks} "
                    f"({'mirrored' if mirror else 'not mirrored'}) -> ROTATE={rotate} ({TURN[rotate]}), "
@@ -417,7 +423,7 @@ def main(out_path, paths):
         verdict = f"VERDICT {rotate} {mirror}"
     else:
         found = len(votes)
-        summary = f"UNSURE: hand found in {found} of {len(paths)} photos, fewer than 3 agree"
+        summary = f"UNSURE: hand found in {found} of {len(paths)} photos, fewer than {need} agree"
         verdict = "VERDICT UNSURE"
     if middle and middle[1] is not None:
         i, image, hand = middle
@@ -440,11 +446,114 @@ if __name__ == "__main__":
 BEAR_ORIENT_END
 }
 
-orient_test() {  # 5 photos of Tony's LEFT index finger pointing to HIS right -> ROTATE/MIRROR in ~/.bear.conf.
-  local id dir i n=5 out report verdict rot mir result
-  need_bear || return 1
-  id=$(cam); dir="$PROBE/orient"
+big_py() {  # Big block letters, turned so they read with the phone held $POSE.
+cat <<'BEAR_BIG_END'
+"""Argv: COLUMNS [TEXT...]. TEXT: print it big. No TEXT: copy stdin and print each event label big."""
+import json
+import signal
+import sys
+
+import cv2
+import numpy as np
+
+SHORT = {"open_palm": "PALM", "thumbs_up": "THUMB", "middle_finger": "MIDDLE"}
+
+
+def big(text, cols):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (w, h), base = cv2.getTextSize(text, font, 1, 2)
+    image = np.zeros((h + base + 4, w + 4), np.uint8)
+    cv2.putText(image, text, (2, h + 2), font, 1, 255, 2)
+    # Side buttons on top = the phone is turned 90 deg CCW, so turn the text 90 deg CW.
+    image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    width = max(8, min(cols - 1, 20))
+    rows = max(1, round(image.shape[0] * width / image.shape[1] / 2))  # a text cell is ~2x taller than wide
+    image = cv2.resize(image, (width, rows), interpolation=cv2.INTER_AREA)
+    print("\n".join("".join("█" if v > 80 else " " for v in row).rstrip() for row in image) + "\n", flush=True)
+
+
+def label(line):
+    if line.startswith("BEAR: dance"):
+        return "DANCE"
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(event, dict) or "gesture" not in event:
+        return None
+    name = event["gesture"] if event["gesture"] != "none" else event.get("expression", "none")
+    return SHORT.get(name, name).upper()
+
+
+def main(cols, words):
+    if words:
+        big(" ".join(words).upper(), cols)
+        return
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl+C stops the bear; we stop at end of input.
+    for line in sys.stdin:
+        print(line, end="", flush=True)
+        text = label(line)
+        if text:
+            big(text, cols)
+
+
+if __name__ == "__main__":
+    main(int(sys.argv[1]), sys.argv[2:])
+BEAR_BIG_END
+}
+
+big_file() {  # Write big_py to a file; print its path.
+  local p="${TMPDIR:-/tmp}/bear-big.py"
+  big_py > "$p" && echo "$p"
+}
+
+cols() { tput cols 2>/dev/null || echo 40; }
+
+say_big() {  # say_big TEXT: one short word, huge and turned (plain text if Python/OpenCV is missing).
+  timeout 30 python "$(big_file)" "$(cols)" "$@" 2>/dev/null || echo "===== $* ====="
+}
+
+finger_check() {  # finger_check N: N finger-test photos -> FT_OUT (report), FT_ROT FT_MIR (or FT_ROT=UNSURE).
+  local id n=$1 dir="$PROBE/orient" i
+  id=$(cam)
   mkdir -p "$dir"; rm -f "$dir"/o*.jpg "$PROBE/orient.jpg"
+  for ((i = 1; i <= n; i++)); do
+    echo "Photo $i of $n..."
+    if ! timeout -k 2 20 "$PHOTO" -c "$id" "$dir/o$i.jpg" || [ ! -s "$dir/o$i.jpg" ]; then
+      fail "no photo from camera $id. Do 2) Camera preview: it says what to fix."; return 1
+    fi
+  done
+  buzz 400
+  echo "Done, you can relax. Looking for the hand (about 10 s)..."
+  FT_OUT=$(cd "$REPO" && orient_py | PYTHONPATH=src timeout 300 python - "$PROBE/orient.jpg" "$dir"/o*.jpg 2>&1) \
+    || { echo "$FT_OUT"; fail "the hand check did not run. Tell Claude."; return 1; }
+  read -r _ FT_ROT FT_MIR <<< "$(tail -n 1 <<< "$FT_OUT")"
+}
+
+finger_pretest() {  # Testing mode, before each live run: 2 photos. No clear finger -> back to the menu.
+  local i
+  echo "FINGER TEST (2 photos): hold the phone $POSE."
+  echo "Stand ~1 m away. LEFT index finger flat to YOUR right."
+  say_big "HAND UP"
+  for i in 5 4 3 2 1; do echo "  $i..."; sleep 1; done
+  finger_check 2 || { say_big "FAIL"; buzz_fail; return 1; }
+  echo "$FT_OUT"
+  case "$FT_ROT" in
+    0|180) conf_set "ROTATE=$FT_ROT" "MIRROR=$FT_MIR"
+           BEAR_ROTATE=$FT_ROT BEAR_MIRROR=$FT_MIR BEAR_FINGER_TEST="ROTATE=$FT_ROT MIRROR=$FT_MIR"
+           say_big "OK $FT_ROT"
+           ok "finger test: ROTATE=$FT_ROT MIRROR=$FT_MIR (saved). Starting the bear." ;;
+    90|270) say_big "UPRIGHT"; buzz_fail
+            fail "finger test: the phone was upright. Hold it $POSE. Back to the menu." ;;
+    *) say_big "NO HAND"; buzz_fail
+       fail "finger test: no clear finger in both photos. Good light, ~1 m, point to your right. Back to the menu." ;;
+  esac
+}
+
+orient_test() {  # 5 photos of Tony's LEFT index finger pointing to HIS right -> ROTATE/MIRROR in ~/.bear.conf.
+  local id n=5 report rot mir result
+  need_bear || return 1
+  id=$(cam)
   cat <<TEXT
 Orientation test with camera $id, ${CAM_NAMES[$id]}:
   1. Stand the phone $POSE.
@@ -455,25 +564,15 @@ Orientation test with camera $id, ${CAM_NAMES[$id]}:
 TEXT
   read -r -p "Push Enter to start. " _ || exit 0
   for i in 5 4 3 2 1; do echo "  $i..."; sleep 1; done
-  for ((i = 1; i <= n; i++)); do
-    echo "Photo $i of $n..."
-    if ! timeout -k 2 20 "$PHOTO" -c "$id" "$dir/o$i.jpg" || [ ! -s "$dir/o$i.jpg" ]; then
-      fail "no photo from camera $id. Do 2) Camera preview: it says what to fix."; return 1
-    fi
-  done
-  timeout 10 termux-vibrate -d 400 >/dev/null 2>&1
-  echo "Done, you can relax. Looking for the hand (about 10 s)..."
-  out=$(cd "$REPO" && orient_py | PYTHONPATH=src timeout 300 python - "$PROBE/orient.jpg" "$dir"/o*.jpg 2>&1) \
-    || { echo "$out"; fail "the hand check did not run. Tell Claude."; return 1; }
-  verdict=$(tail -n 1 <<< "$out")
-  read -r _ rot mir <<< "$verdict"
+  finger_check "$n" || return 1
+  rot=$FT_ROT mir=$FT_MIR
   case "$rot" in
-    0|180) conf_set "ROTATE=$rot" "MIRROR=$mir"
+    0|180) conf_set "ROTATE=$rot" "MIRROR=$mir"; say_big "SAVED"
            result="SAVED ROTATE=$rot MIRROR=$mir in ~/.bear.conf. Always hold the phone this same way. Do 2) Camera preview to check." ;;
-    90|270) result="NOT SAVED: the phone was upright. Stand it $POSE, then do 3) again." ;;
-    *) result="NOT SAVED: not sure. Use good light, point clearly to your right, then do 3) again." ;;
+    90|270) say_big "UPRIGHT"; result="NOT SAVED: the phone was upright. Stand it $POSE, then do 3) again." ;;
+    *) say_big "AGAIN"; result="NOT SAVED: not sure. Use good light, point clearly to your right, then do 3) again." ;;
   esac
-  report=$(printf 'bear orientation test, camera %s\n%s\n%s' "$id" "$(sed '$d' <<< "$out")" "$result")
+  report=$(printf 'bear orientation test, camera %s\n%s\n%s' "$id" "$(sed '$d' <<< "$FT_OUT")" "$result")
   echo; echo "$report"
   if printf '%s\n' "$report" | timeout 10 termux-clipboard-set >/dev/null 2>&1; then
     echo "(The report is copied: paste it to Claude.)"
@@ -495,15 +594,26 @@ run_bear() {  # Arguments go to barnaby. Output is also in ~/bear-logs/<time>.lo
   echo "To stop: push Ctrl+C (CTRL key on the Termux bar, then C). Log: $log"
   timeout 10 termux-wake-lock >/dev/null 2>&1; WAKE=1
   trap 'echo' INT
-  (cd "$REPO" && PYTHONPATH=src exec python -u -m barnaby --headless "$@" "${extra[@]}") 2>&1 | tee -i "$log"
+  if [ "${BEAR_BIG:-0}" = 1 ]; then  # Each new label also huge, readable with the phone sideways.
+    (cd "$REPO" && PYTHONPATH=src exec python -u -m barnaby --headless "$@" "${extra[@]}") 2>&1 | tee -i "$log" \
+      | python -u "$(big_file)" "$(cols)"
+  else
+    (cd "$REPO" && PYTHONPATH=src exec python -u -m barnaby --headless "$@" "${extra[@]}") 2>&1 | tee -i "$log"
+  fi
   trap - INT
   wake_off
   echo "Bear stopped. Log: $log"
 }
 
 run_live() {  # Phone camera: ~1 photo per 1.5 s, so react on each photo.
-  local id
+  local id BEAR_DEBUG=0 BEAR_BIG=0 BEAR_FINGER_TEST="not run"
+  export BEAR_DEBUG BEAR_BIG BEAR_FINGER_TEST
   id=$(cam); turn_env
+  if [ "$(conf_get TESTING 1)" = 1 ]; then  # Testing mode: finger test first, big labels, debug in each event.
+    need_bear || return 1
+    finger_pretest || return 1
+    BEAR_DEBUG=1 BEAR_BIG=1
+  fi
   echo "Hold the phone $POSE, the same way as in 3) Orientation test. ~1 photo per 1.5 s."
   echo "Camera $id, ${CAM_NAMES[$id]}, ROTATE=$BEAR_ROTATE MIRROR=$BEAR_MIRROR."
   run_bear --source "termux:$id" --stable-frames 1 --interval 0 "$@"
@@ -573,6 +683,13 @@ shortcut() {
   ok "shortcut is ready. Open a new Termux session, then type: bear"
 }
 
+on_off() { [ "$1" = 1 ] && echo ON || echo OFF; }
+
+toggle_testing() {
+  conf_set "TESTING=$((1 - $(conf_get TESTING 1)))"
+  ok "testing mode $(on_off "$(conf_get TESTING 1)")."
+}
+
 VIDEO=""
 install_self
 while true; do
@@ -588,6 +705,7 @@ while true; do
  6) Run on a recorded video
  7) Pick camera (now: $id, ${CAM_NAMES[$id]})
  8) Install shortcut "bear"
+ 9) Testing mode (now: $(on_off "$(conf_get TESTING 1)")): finger test + big text + debug in LIVE runs
  q) Quit
 MENU
   read -r -p "Type a number, then push Enter: " choice || exit 0
@@ -600,8 +718,9 @@ MENU
     6) run_video ;;
     7) pick_camera ;;
     8) shortcut ;;
+    9) toggle_testing ;;
     q|Q) exit 0 ;;
-    *) echo "Type 1 to 8, or q."; continue ;;
+    *) echo "Type 1 to 9, or q."; continue ;;
   esac
   pause
 done
