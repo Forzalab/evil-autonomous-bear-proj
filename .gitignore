@@ -25,7 +25,7 @@ data/
 models/*.part
 recordings/
 *.log
-
+voices/
 # OS and editor files
 .DS_Store
 Thumbs.db
