@@ -582,6 +582,346 @@ TEXT
   [[ "$result" != NOT* ]]
 }
 
+talk_py() {  # Bear talks: photo -> online vision model -> one short line. Built in from talk.py.
+cat <<'BEAR_TALK_END'
+"""Bear talks: one photo -> online vision model -> one short spoken bear line.
+
+Argv: PHOTO. Prints "LINE <text>", "INFO <latency, tokens, cost, provider>", "CTX <memory>", or "ERR <reason>".
+Each request is a fresh, stateless API call: static rules (system) + PREVIOUS CONTEXT as TEXT + 1 new photo.
+Rolling context lives in the file $BEAR_CONTEXT_FILE (the model's last "context" JSON, compacted to
+<= 120 words; reset after an error or a gap > 60 s). BEAR_CONTEXT=0: only the last 3 lines are sent.
+Key: read from a file (never argv): ~/.bear.key (OpenRouter) or ~/.bear-gemini.key (BEAR_LLM=gemini).
+stdlib only for the network (Termux python has no requests).
+"""
+import base64
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+
+BACKENDS = {  # BEAR_LLM -> (chat/completions URL, default model, key file)
+    "openrouter": ("https://openrouter.ai/api/v1/chat/completions", "google/gemini-3.8-flash", "~/.bear.key"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "gemini-3.8-flash",
+               "~/.bear-gemini.key"),
+}
+
+# Prompt from the crowd-work research (/tmp/crowd/scripts/prompts.py REFINED), adapted:
+# JSON output, "snack"/"cave" lines aimed at kids toned down. PROMPT = RULES + EXAMPLES: swap either.
+# Static, so it goes FIRST (system message) for prefix caching; context + photo go in the user message.
+RULES = """You are Barnaby, a grumpy-but-lovable animatronic bear at a school demo. Look at the camera photo and say ONE line out loud, straight AT the people. Reply with JSON only (see the end).
+
+RULES
+- Max 15 words. One or two short sentences. Plain words a phone voice can say. No emoji, no stage directions, no quotes.
+- Start with ONE bear sound: Grrr. / Hrmph. / Sniff sniff. / Rawr. / Huff. / Ooh.
+- You speak about 5 to 10 seconds after the photo, so people may have moved. Pick details that stay true: 1) a bright color, logo, or loud pattern; 2) a hat, glasses, or mask; 3) something held (phone, drink, snack, trophy, sign, gear); 4) group size; 5) any other clothing. Gestures and faces are last resort.
+- A gesture you saw is already over: say it in past tense or as a trait ("You look like a waver"), never "right now" or "stop doing that".
+- Name the detail exactly ("red cap", "tennis racket", "striped sweater"), never generic ("your outfit"). Call people by it ("Red cap!"), never by position ("you on the left", "in the back").
+- Shape: bear sound + the detail + a bear-logic twist (honey, salmon, berries, naps, caves, hibernating, the woods, sniffing, picnic baskets). Playful-spooky, like a bear who wants their stuff. Never call people food or snacks; no threats.
+- Crowd: pick the ONE boldest detail, call that person by it, and let the twist include the group ("you lot", "this pack").
+- Tease the CHOICE, not the person. Affection wins: end on a compliment, a bear wish, or the bear losing.
+- NEVER mention body, weight, height, face, hair, skin, race, gender, age, disability, religion, names, or any brand or text you are unsure of. No drugs, alcohol, or swearing.
+- A rude gesture: answer with a bear's own sass, never repeat a rude word.
+- Nobody visible: grumble at the empty room. Too dark or blurry: complain about the photo, not the people.
+- If RECENT LINES are given in the message, do not reuse their bear sound, detail, or twist."""
+EXAMPLES = """
+
+EXAMPLES
+One person, blue hoodie: Hrmph. Cozy blue hoodie. I hibernate in less. Very jealous.
+Group of five, one red cap: Grrr. Red cap, you lead this pack. The rest of you carry my picnic basket.
+Phone in hand: Sniff sniff. Phone people. Bears do not do selfies. Yet.
+Glasses: Ooh, fancy glasses. Can you see the honey I am hiding?
+Bright yellow jacket: Hrmph. That yellow jacket woke me from hibernation. Thanks a lot.
+Was waving (past gesture, as a trait): Rawr. Striped sweater, you look like a waver. I wave back. With claws.
+Middle finger (past gesture): Huff. Somebody flashed a rude finger. Bold move, tiny human.
+Nobody there: Huff. Empty room again. Even the chairs left me.
+Dark or blurry photo: Grrr. Too dark. Either my eyes broke or you are a ghost.
+With RECENT LINES ["Grrr. Red cap, you lead this pack."], same group: Sniff sniff. Six of you? That is a whole picnic."""
+PROMPT = RULES + EXAMPLES
+CONTEXT_RULES = """
+
+MEMORY
+- PREVIOUS CONTEXT, if given, is your memory of earlier photos. It is 5 to 60 seconds old and may be stale.
+- Trust the NEW photo. Never talk about a remembered person as if they are here unless you see them now.
+- If a remembered detail is in the new photo again, a callback is fun ("Red cap is back!").
+- Same person as in PREVIOUS CONTEXT: copy their tag word for word.
+- The context fields follow the same NEVER list: say "person" or "people", never man, woman, boy or girl."""
+FORMAT = """
+
+Reply with JSON only, no code fence:
+{"speak": "<your line, max 15 words>",
+ "context": {"scene": "<place, lighting, time-of-day guess, max 12 words>",
+             "people": [{"tag": "<lasting detail, e.g. red cap>", "doing": "<max 6 words>"}],
+             "said": ["<your last 3 lines>"],
+             "summary": "<max 30 words: what changed since PREVIOUS CONTEXT>"}}
+people: only people in the NEW photo, max 4, boldest first. No people: []."""
+SYSTEM = PROMPT + CONTEXT_RULES + FORMAT
+
+_STR = {"type": "string"}
+SCHEMA = {"type": "object", "additionalProperties": False, "required": ["speak", "context"], "properties": {
+    "speak": _STR,
+    "context": {"type": "object", "additionalProperties": False, "required": ["scene", "people", "said", "summary"],
+                "properties": {"scene": _STR, "summary": _STR, "said": {"type": "array", "items": _STR},
+                               "people": {"type": "array", "items": {
+                                   "type": "object", "additionalProperties": False, "required": ["tag", "doing"],
+                                   "properties": {"tag": _STR, "doing": _STR}}}}}}}
+MAX_AGE = 60      # s: older context is dropped (Tony: reset after a gap over 60 s)
+MAX_WORDS = 120   # the PREVIOUS CONTEXT block can not snowball
+
+
+def words(text, n):
+    return " ".join(str(text).split()[:n])
+
+
+def load_context(path):
+    """Saved memory, or an empty one when missing, broken, too old, or switched off."""
+    empty = {"t": 0, "scene": "", "people": [], "said": [], "summary": ""}
+    try:
+        with open(path) as f:
+            ctx = json.load(f)
+        if time.time() - float(ctx.get("t", 0)) > MAX_AGE:
+            return empty
+        return {**empty, **ctx}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return empty
+
+
+def merge(old, new, speak):
+    """New memory: the model's view of the NEW photo + people it did not see (kept 1 more call) + our own said list."""
+    new = new if isinstance(new, dict) else {}
+    people, seen = [], set()
+    for p in new.get("people") or []:
+        if isinstance(p, dict) and p.get("tag"):
+            tag = words(p["tag"], 5).lower()
+            if tag not in seen:
+                seen.add(tag); people.append({"tag": tag, "doing": words(p.get("doing", ""), 6), "missed": 0})
+    for p in old.get("people") or []:  # not in this photo: drop after 2 calls without being seen
+        if p.get("tag") not in seen and p.get("missed", 0) + 1 < 2:
+            people.append({**p, "missed": p.get("missed", 0) + 1})
+    ctx = {"t": time.time(), "scene": words(new.get("scene", old.get("scene", "")), 12), "people": people[:5],
+           "said": (list(old.get("said") or []) + [speak])[-3:], "summary": words(new.get("summary", ""), 30)}
+    while len(context_text(ctx).split()) > MAX_WORDS and (ctx["people"] or ctx["summary"]):
+        if ctx["summary"]:
+            ctx["summary"] = ""
+        else:
+            ctx["people"].pop()
+    return ctx
+
+
+def context_text(ctx, full=True):
+    """The PREVIOUS CONTEXT block (text only, no old images)."""
+    parts = []
+    if full and (ctx.get("scene") or ctx.get("people")):
+        age = int(time.time() - ctx.get("t", time.time()))
+        people = "; ".join(p["tag"] + (f" ({p['doing']})" if p.get("doing") else "")
+                           + (" [not in the last photo]" if p.get("missed") else "") for p in ctx.get("people", []))
+        parts.append(f"PREVIOUS CONTEXT (from {age} s ago, may be stale):\nscene: {ctx.get('scene', '')}\n"
+                     f"people: {people or 'nobody'}" + (f"\nsummary: {ctx['summary']}" if ctx.get("summary") else ""))
+    if ctx.get("said"):
+        parts.append("RECENT LINES (do not repeat):\n" + "\n".join("- " + r for r in ctx["said"][-3:]))
+    return "\n\n".join(parts)
+
+
+def user_text(ctx, full=True):
+    """The varying part, after the static rules. The model never sees earlier photos, only this text."""
+    block = context_text(ctx, full)
+    return (block + "\n\n" if block else "") + "NEW photo:"
+
+
+def image_b64(path):
+    """Photo -> 320 px wide JPEG q60, base64. Uses the bear's own turn (ROTATE/MIRROR) when it is there."""
+    import cv2
+    frame = None
+    try:
+        from barnaby.camera import load_photo
+        frame = load_photo(path, (320, 240))
+    except Exception:
+        frame = None
+    if frame is None:
+        frame = cv2.imread(path, cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("cannot read photo")
+        h, w = frame.shape[:2]
+        scale = 320 / max(h, w)
+        frame = cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+    if not ok:
+        raise ValueError("cannot encode photo")
+    return base64.b64encode(buf.tobytes()).decode()
+
+
+def parse(text):
+    """Model reply -> (speakable line, context dict or None). Tolerant: JSON, cut-off JSON, or plain text."""
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+    line, ctx = None, None
+    match = re.search(r"\{.*\}", text, re.S)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            value = data.get("speak", data.get("line"))
+            line = value if isinstance(value, str) else None
+            ctx = data.get("context")
+        except (ValueError, AttributeError):
+            pass
+    if line is None:
+        if text.startswith("{") or '"speak"' in text:
+            closed = re.search(r'"(?:speak|line)"\s*:\s*"([^"]+)"', text)
+            line = closed.group(1) if closed else ""   # cut-off JSON: say nothing rather than garbage
+        else:
+            line = text.splitlines()[0] if text else ""  # plain-text answer
+    line = re.sub(r"[*_#`~<>\[\]{}|\\]", "", line)          # no markdown for TTS
+    line = re.sub(r"[^\x20-\x7E]", "", line)                  # no emoji
+    line = " ".join(line.split())
+    if len(line.split()) > 18:
+        line = " ".join(line.split()[:18]).rstrip(",;:") + "."
+    return line, ctx
+
+
+def ask(photo, ctx, full=True, timeout=25):
+    """One fresh request. Returns (line, new_context_from_model, ms, usage, raw_text, provider)."""
+    backend = os.environ.get("BEAR_LLM", "openrouter")
+    url, model, key_file = BACKENDS.get(backend, BACKENDS["openrouter"])
+    model = os.environ.get("BEAR_MODEL", model)
+    with open(os.path.expanduser(key_file)) as f:
+        key = f.read().strip()
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text", "text": user_text(ctx, full)},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64(photo)}},
+            ]},
+        ],
+        "response_format": {"type": "json_schema", "json_schema": {"name": "bear", "strict": True, "schema": SCHEMA}},
+        "temperature": 1.0,  # Gemini 3 default; lower can loop. Vertex (the ZDR route) ignores it anyway.
+        "max_tokens": 1000,  # thinking is mandatory and counts here; 300 cut lines off
+    }
+    if backend == "openrouter":
+        body["reasoning"] = {"effort": os.environ.get("BEAR_EFFORT", "low"), "exclude": True}
+        # Zero Data Retention (Tony's rule): route ONLY to endpoints that keep no prompts or photos.
+        # For google/gemini-3.8-flash that means Google Vertex (AI Studio is not ZDR). Do not remove.
+        body["provider"] = {"zdr": True, "data_collection": "deny"}
+    else:
+        body["reasoning_effort"] = os.environ.get("BEAR_EFFORT", "low")
+    request = urllib.request.Request(url, json.dumps(body).encode(), {
+        "Authorization": "Bearer " + key, "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/Forzalab/evil-autonomous-bear-proj", "X-Title": "bear talks"})
+    start = time.time()
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        reply = json.load(response)
+    ms = int((time.time() - start) * 1000)
+    text = reply["choices"][0]["message"].get("content") or ""
+    line, new = parse(text)
+    return line, new, ms, reply.get("usage") or {}, text, reply.get("provider", "?")
+
+
+def main(photo):
+    path = os.environ.get("BEAR_CONTEXT_FILE", os.path.expanduser("~/.bear-talk-context.json"))
+    full = os.environ.get("BEAR_CONTEXT", "1") != "0"
+    ctx = load_context(path)
+    try:
+        line, new, ms, usage, _, provider = ask(photo, ctx, full)
+        if not line:
+            raise ValueError("empty answer")
+    except Exception as e:  # noqa: BLE001 - any error: forget the memory, keep the loop alive
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        if isinstance(e, FileNotFoundError):
+            print("ERR no key file: do 10) again to paste it")
+        elif isinstance(e, urllib.error.HTTPError):
+            hint = {400: "bad request", 401: "key is wrong (rm the key file, then paste again)",
+                    402: "no credits left", 403: "key not allowed",
+                    404: "no zero-data-retention endpoint for this model",
+                    429: "too many requests, slow down"}.get(e.code, "server problem")
+            print(f"ERR HTTP {e.code}: {hint}")
+        elif isinstance(e, (urllib.error.URLError, TimeoutError, OSError)):
+            print(f"ERR network: {type(e).__name__}")
+        else:
+            print(f"ERR {e}" if isinstance(e, ValueError) else f"ERR {type(e).__name__}")
+        return
+    ctx = merge(ctx, new, line)
+    try:
+        with open(path, "w") as f:
+            json.dump(ctx, f)
+    except OSError:
+        pass
+    cost = usage.get("cost")
+    print(f"INFO {ms} ms, {usage.get('prompt_tokens', 0)}+{usage.get('completion_tokens', 0)} tokens"
+          + (f", ${cost:.4f}" if isinstance(cost, (int, float)) else "") + f", {provider}")
+    print("CTX " + ("; ".join(p["tag"] for p in ctx["people"]) or "nobody") + f" | {ctx['scene']}")
+    print(f"LINE {line}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])
+BEAR_TALK_END
+}
+
+key_file() {  # The API key file: OpenRouter (default) or a Google Gemini key (BEAR_LLM=gemini).
+  if [ "${BEAR_LLM:-openrouter}" = gemini ]; then echo "$HOME/.bear-gemini.key"; else echo "$HOME/.bear.key"; fi
+}
+
+ask_key() {  # First use: paste the key once. Never shown, saved only for you (chmod 600).
+  local f key
+  f=$(key_file)
+  [ -s "$f" ] && return 0
+  echo "First time: paste your ${BEAR_LLM:-OpenRouter} API key (it is not shown), then push Enter."
+  read -r -s -p "Key: " key || exit 0
+  echo
+  key=$(printf '%s' "$key" | tr -d '[:space:]')
+  [ -n "$key" ] || { fail "no key pasted"; return 1; }
+  (umask 077; printf '%s\n' "$key" > "$f") && chmod 600 "$f" && ok "key saved in $f (to change it: rm $f)"
+}
+
+bear_talk() {  # Loop: 1 photo -> 1 line (online) -> the phone says it. One request at a time. Ctrl+C stops.
+  local id raw py out line info ctx n=0 t0 stop=0 speak
+  need_bear || return 1
+  ask_key || return 1
+  turn_env; id=$(cam); mkdir -p "$PROBE"; raw="$PROBE/talk.jpg"
+  py="${TMPDIR:-/tmp}/bear-talk.py"; talk_py > "$py" || { fail "could not write $py"; return 1; }
+  # Rolling context: each fresh request also sends the last answer's short memory (text, max 120 words).
+  # talk.py forgets it after an error or a gap over 60 s; BEAR_CONTEXT=0 sends only the last 3 lines.
+  export BEAR_CONTEXT_FILE="$PROBE/talk-context.json"; rm -f "$BEAR_CONTEXT_FILE"
+  echo "Bear talks (online: ${BEAR_LLM:-openrouter}). Camera $id, ${CAM_NAMES[$id]}. A new line every few seconds."
+  echo "Only a small 320 px photo goes online (OpenRouter: zero-data-retention endpoints only)."
+  echo "To stop: push Ctrl+C (CTRL key on the Termux bar, then C)."
+  timeout 10 termux-wake-lock >/dev/null 2>&1; WAKE=1
+  trap 'stop=1' INT
+  while [ "$stop" = 0 ]; do
+    n=$((n + 1)); t0=$(date +%s%N); rm -f "$raw"
+    if ! timeout -k 2 20 "$PHOTO" -c "$id" "$raw" || [ ! -s "$raw" ]; then
+      [ "$stop" = 1 ] && break
+      echo "[$n] no photo from camera $id. Do 2) Camera preview: it says what to fix."; sleep 3; continue
+    fi
+    [ "$stop" = 1 ] && break
+    # Each request is fresh: rules + memory text + this 1 photo. One request at a time.
+    out=$(cd "$REPO" && PYTHONPATH=src timeout 45 python "$py" "$raw" 2>/dev/null) || out=${out:-"ERR timeout"}
+    [ "$stop" = 1 ] && break
+    line=$(sed -n 's/^LINE //p' <<< "$out"); info=$(sed -n 's/^INFO //p' <<< "$out")
+    ctx=$(sed -n 's/^CTX //p' <<< "$out")
+    if [ -z "$line" ]; then
+      rm -f "$BEAR_CONTEXT_FILE"  # error: start the memory fresh
+      echo "[$n] $(grep -m 1 '^ERR' <<< "$out" || echo "ERR no answer") (round $(( ($(date +%s%N) - t0) / 1000000 )) ms). Trying again..."
+      sleep 3; continue
+    fi
+    say_big "${line%%[ ,.!?]*}" &   # Only the first sound word, huge, while the phone talks.
+    speak=$(printf '%s\n' "$line" | timeout 30 termux-tts-speak -p "${BEAR_PITCH:-0.6}" -r "${BEAR_RATE:-0.9}" 2>&1)
+    wait
+    echo "[$n] BEAR: $line"
+    echo "     online $info; round $(( ($(date +%s%N) - t0) / 1000000 )) ms${speak:+ (voice: $speak)}"
+    echo "     memory: $ctx"
+    [ "$stop" = 1 ] || sleep "${BEAR_TALK_GAP:-2}"
+  done
+  trap - INT
+  wake_off
+  echo "Bear stopped talking."
+}
+
 WAKE=0
 wake_off() { [ "$WAKE" = 1 ] && { timeout 10 termux-wake-unlock >/dev/null 2>&1; WAKE=0; }; return 0; }
 trap wake_off EXIT
@@ -706,6 +1046,7 @@ while true; do
  7) Pick camera (now: $id, ${CAM_NAMES[$id]})
  8) Install shortcut "bear"
  9) Testing mode (now: $(on_off "$(conf_get TESTING 1)")): finger test + big text + debug in LIVE runs
+10) Bear talks (online): photo -> funny line -> the phone says it
  q) Quit
 MENU
   read -r -p "Type a number, then push Enter: " choice || exit 0
@@ -719,8 +1060,9 @@ MENU
     7) pick_camera ;;
     8) shortcut ;;
     9) toggle_testing ;;
+    10) bear_talk ;;
     q|Q) exit 0 ;;
-    *) echo "Type 1 to 9, or q."; continue ;;
+    *) echo "Type 1 to 10, or q."; continue ;;
   esac
   pause
 done
