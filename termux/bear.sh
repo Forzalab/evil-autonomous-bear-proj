@@ -14,6 +14,11 @@ PHOTO="${TERMUX_CAMERA_PHOTO:-termux-camera-photo}"
 TRIGGER_GESTURE="thumbs_up"   # The README example. Cooldown: the app default.
 CAM_ORDER=(3 1 0 2)
 CAM_NAMES=([0]="back" [1]="front wide" [2]="back ultrawide" [3]="front (Pi-like)")
+# How to hold the phone: always the SAME sideways way, like a fixed Pi camera (the bear never
+# turns the picture by itself; no motion sensor is read). Front camera EXIF is always 8 (sensor
+# turned 270), so the raw frame is upright when the phone's right edge (S23 side buttons) is on top.
+# Tony's orientation test gave ROTATE=0 MIRROR=0, which fits this. Any fixed way works, because 3) measures it.
+POSE="SIDEWAYS, screen to you, side buttons on TOP (front camera on your LEFT)"
 export DEBIAN_FRONTEND=noninteractive GIT_TERMINAL_PROMPT=0
 
 ok()   { echo "OK: $*"; }
@@ -327,7 +332,7 @@ if frame is None or not cv2.imwrite(sys.argv[2], frame):
 print(f"{frame.shape[1]}x{frame.shape[0]}")' "$raw" "$out") || { fail "could not read the photo."; return 1; }
   ok "preview $size (ROTATE=$BEAR_ROTATE MIRROR=$BEAR_MIRROR): $out"
   timeout 10 termux-open "$out" >/dev/null 2>&1 || echo "Open it in the Files app: $out"
-  echo "If the picture is upside down, sideways or mirrored, do 3) Orientation test."
+  echo "If the picture is upside down, sideways or mirrored: hold the phone $POSE, then do 3) Orientation test."
 }
 
 orient_py() {  # The orientation test check in Python. Last output line: "VERDICT <rotate> <mirror>" or "VERDICT UNSURE".
@@ -442,7 +447,8 @@ orient_test() {  # 5 photos of Tony's LEFT index finger pointing to HIS right ->
   mkdir -p "$dir"; rm -f "$dir"/o*.jpg "$PROBE/orient.jpg"
   cat <<TEXT
 Orientation test with camera $id, ${CAM_NAMES[$id]}:
-  1. Stand the phone SIDEWAYS (long edge flat), the camera looking at you.
+  1. Stand the phone $POSE.
+     Always hold it this same way for the bear (a Pi camera does not turn either).
   2. Stand about 1 m away (the hand must look big) and face the camera.
   3. Hold up your LEFT hand. Point the index finger flat to YOUR right side.
      Curl the other fingers. Keep still until the phone buzzes (about 15 s).
@@ -463,8 +469,8 @@ TEXT
   read -r _ rot mir <<< "$verdict"
   case "$rot" in
     0|180) conf_set "ROTATE=$rot" "MIRROR=$mir"
-           result="SAVED ROTATE=$rot MIRROR=$mir in ~/.bear.conf. Do 2) Camera preview to check." ;;
-    90|270) result="NOT SAVED: the phone was upright. Stand it SIDEWAYS, then do 3) again." ;;
+           result="SAVED ROTATE=$rot MIRROR=$mir in ~/.bear.conf. Always hold the phone this same way. Do 2) Camera preview to check." ;;
+    90|270) result="NOT SAVED: the phone was upright. Stand it $POSE, then do 3) again." ;;
     *) result="NOT SAVED: not sure. Use good light, point clearly to your right, then do 3) again." ;;
   esac
   report=$(printf 'bear orientation test, camera %s\n%s\n%s' "$id" "$(sed '$d' <<< "$out")" "$result")
@@ -498,7 +504,7 @@ run_bear() {  # Arguments go to barnaby. Output is also in ~/bear-logs/<time>.lo
 run_live() {  # Phone camera: ~1 photo per 1.5 s, so react on each photo.
   local id
   id=$(cam); turn_env
-  echo "Hold the phone sideways, like in 3) Orientation test. ~1 photo per 1.5 s."
+  echo "Hold the phone $POSE, the same way as in 3) Orientation test. ~1 photo per 1.5 s."
   echo "Camera $id, ${CAM_NAMES[$id]}, ROTATE=$BEAR_ROTATE MIRROR=$BEAR_MIRROR."
   run_bear --source "termux:$id" --stable-frames 1 --interval 0 "$@"
 }
