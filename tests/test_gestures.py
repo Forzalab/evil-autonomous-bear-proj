@@ -28,6 +28,8 @@ class GesturesTest(unittest.TestCase):
             (hand((True, True, False, False)), "peace"),
             (hand((True, False, False, False)), "pointing"),
             (hand((False,) * 4, thumb_up=True), "thumbs_up"),
+            (hand((False, True, False, False)), "middle_finger"),
+            (hand((False, True, False, False), thumb_up=True), "middle_finger"),
             (hand((False, True, False, True)), "unknown"),
         ]
         for points, expected in poses:
@@ -39,6 +41,23 @@ class GesturesTest(unittest.TestCase):
         points = hand((False,) * 4, thumb_up=True)
         points[:, :2] = points[:, :2] @ np.array([[0, -1], [1, 0]])
         self.assertEqual(classify_gesture(points), "unknown")
+
+    def test_middle_finger_needs_other_fingers_curled(self):
+        for extended in ((True, True, False, False), (False, True, True, False),
+                         (False, True, False, True), (False, True, True, True)):
+            with self.subTest(extended=extended):
+                self.assertNotEqual(classify_gesture(hand(extended)), "middle_finger")
+
+    def test_middle_finger_any_rotation(self):
+        # Rule is angle based, so a bird pointed sideways or down still counts.
+        points = hand((False, True, False, False))
+        for angle in (90, 180, 270):
+            theta = np.radians(angle)
+            rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+            rotated = points.copy()
+            rotated[:, :2] = points[:, :2] @ rot.T
+            with self.subTest(angle=angle):
+                self.assertEqual(classify_gesture(rotated), "middle_finger")
 
     def test_bad_landmarks(self):
         for points in (np.zeros((21, 3)), np.zeros((5, 3)), np.full((21, 3), np.nan)):
