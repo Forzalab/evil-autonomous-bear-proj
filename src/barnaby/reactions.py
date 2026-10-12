@@ -26,6 +26,8 @@ def on_perception(event: PerceptionEvent) -> None:
     if DEBUG:
         payload["debug"] = debug_info()
     print(json.dumps(payload), flush=True)
+    from bear_decider import bridge  # lazy: bridge imports barnaby.trigger, which imports this module
+    bridge.handle(event)
 
 
 def debug_info() -> dict:

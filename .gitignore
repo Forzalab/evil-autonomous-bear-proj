@@ -30,3 +30,6 @@ recordings/
 .DS_Store
 Thumbs.db
 .idea/
+
+# Built on the Pi from pi/dance.cc
+pi/dance
