@@ -33,3 +33,6 @@ Thumbs.db
 
 # Built on the Pi from pi/dance.cc
 pi/dance
+
+# Built on the Pi from pi/bear_auto.cc
+pi/bear_auto
