@@ -7,6 +7,6 @@ These are copies of `~/tony-tests` on Pi #1 (user `spauly`). They run there, not
   - `DRY=1` runs it without touching any GPIO pin.
 - `pin_hunt.sh [pins...]`: announces each pin by voice, pulses it for 0.7 s, then waits. Phase 2 is the wheels, using `wheel_test` built from `~/test2.cc`. Set `NO_WHEELS=1` to skip it.
 - `say.py`: speaks through McKay's Piper TTS and waits until playback has finished. Exiting earlier makes it silent.
-- `dance_launch.py`: not included yet. It wraps `barnaby.app.on_perception` at runtime with `bear_decider.bridge`.
+- `dance_launch.py`: runs McKay's app with `barnaby.app.on_perception` wrapped by `bear_decider.bridge` at runtime. Each dance also speaks a canned line. Gemini is off unless you pass `--gemini` or answer y at the prompt. Run it from McKay's repo: `.venv/bin/python ~/tony-tests/dance_launch.py --source 0`.
 
 Undo: run `crontab -e`, delete the line, then `rm ~/tony-tests/boot.sh`.
