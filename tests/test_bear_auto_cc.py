@@ -65,6 +65,23 @@ class BearAutoCcTest(unittest.TestCase):
                              capture_output=True, text=True, timeout=30)
         self.assertIn("delay(500)", wpi_calls(res.stdout))
 
+    def test_selftest_no_wheels_never_steps(self):
+        res = subprocess.run([self.exe, "--selftest", "--fake-cam", "--no-wheels"],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn(">>> WHEELS: SKIPPED", res.stdout)
+        self.assertIn(">>> RELAY: PASS", res.stdout)
+        calls = wpi_calls(res.stdout)
+        for pin in (13, 20, 26, 21):
+            self.assertNotIn(f"digitalWrite({pin},HIGH)", calls)
+
+    def test_selftest_no_relay_never_pulses(self):
+        res = subprocess.run([self.exe, "--selftest", "--fake-cam", "--no-relay"],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn(">>> RELAY: SKIPPED", res.stdout)
+        self.assertNotIn("digitalWrite(17,HIGH)", wpi_calls(res.stdout))
+
     def test_autonomous_fake_cam_fires_person(self):
         proc = subprocess.Popen([self.exe, "--fake-cam", "--cooldown", "1"],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

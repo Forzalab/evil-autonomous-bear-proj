@@ -142,17 +142,23 @@ int selftest() {
         cam.close_dev();
         failed += result("CAMERA", ok);
     }
-    bool gpio = gpio_init();
+    bool gpio = (opt.relay || opt.wheels) && gpio_init();
     banner("STEP 2/3: RELAY (BCM17)");
-    if (gpio) printf("pulse %d ms\n", opt.pulse_ms), pulse_relay(opt.pulse_ms);
-    failed += result("RELAY", gpio && !stop);
-    banner("STEP 3/3: WHEELS (STEP 13/20, DIR 26/21)");
-    if (gpio) {
-        puts("wheel 1 fwd 200"); spin(true, false, 200, true);
-        puts("wheel 2 fwd 200"); spin(false, true, 200, true);
-        puts("both back 200");   spin(true, true, 200, false);
+    if (!opt.relay) puts(">>> RELAY: SKIPPED (--no-relay)");
+    else {
+        if (gpio) printf("pulse %d ms\n", opt.pulse_ms), pulse_relay(opt.pulse_ms);
+        failed += result("RELAY", gpio && !stop);
     }
-    failed += result("WHEELS", gpio && !stop);
+    banner("STEP 3/3: WHEELS (STEP 13/20, DIR 26/21)");
+    if (!opt.wheels) puts(">>> WHEELS: SKIPPED (--no-wheels)");
+    else {
+        if (gpio) {
+            puts("wheel 1 fwd 200"); spin(true, false, 200, true);
+            puts("wheel 2 fwd 200"); spin(false, true, 200, true);
+            puts("both back 200");   spin(true, true, 200, false);
+        }
+        failed += result("WHEELS", gpio && !stop);
+    }
     pins_idle();
     printf("\nselftest done: %d failed, pins idle\n", failed);
     return failed;
