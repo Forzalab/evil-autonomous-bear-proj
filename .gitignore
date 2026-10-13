@@ -36,3 +36,7 @@ pi/dance
 
 # Built on the Pi from pi/bear_auto.cc
 pi/bear_auto
+pi/tony-tests/run_both
+pi/tony-tests/wheel_real
+pi/tony-tests/sos_real
+pi/tony-tests/step_pin
