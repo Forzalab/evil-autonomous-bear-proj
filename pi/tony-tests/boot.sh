@@ -112,7 +112,9 @@ if [ "$state" = ONLINE ]; then
     elif [ "${DRY:-0}" = 1 ]; then log "DRY: would start claude rc"
     else
         # No tmux/screen on the Pi: `script` gives claude rc the terminal it needs.
-        (cd /home/spauly && nohup setsid script -qfc "claude rc" /dev/null >"$T/claude-rc.log" 2>&1 &)
+        # claude rc asks "Trust /home/spauly? [y/N]" every run (home-dir trust isn't saved): answer y after 10 s,
+        # then keep stdin open (sleep infinity) so script doesn't see EOF and close the session.
+        (cd /home/spauly && setsid bash -c '(sleep 10; printf "y\r"; sleep infinity) | script -qfc "claude rc" /dev/null' >"$T/claude-rc.log" 2>&1 &)
         sleep 5; pgrep -f "claude rc" >/dev/null && log "claude rc started (log: claude-rc.log)" || log "claude rc FAILED to start (see claude-rc.log)"
     fi
 fi
