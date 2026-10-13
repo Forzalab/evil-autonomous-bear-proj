@@ -1,6 +1,6 @@
 #!/bin/bash
-# boot.sh — run at power-on from cron (@reboot). Everything is audible: the bear has no screen.
-# Order: audio + bluetooth speaker → wifi by name (background) → one-shot pin hunt → say online/offline.
+# boot.sh — run at power-on from cron (@reboot). Silent: logs only, no voice cues (the bear has no screen; check boot.log).
+# Order: bluetooth speaker → wifi by name (background) → one-shot pin hunt → claude rc if online. Silent: no voice cues.
 # DRY=1: no GPIO, flags kept; checks and logging still run.
 # Undo: crontab -e (delete the boot.sh line) ; rm ~/tony-tests/boot.sh
 T=/home/spauly/tony-tests
@@ -8,7 +8,7 @@ exec >>"$T/boot.log" 2>&1
 export HOME=/home/spauly XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 PATH="/home/spauly/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 PY=/home/spauly/Desktop/barnaby/evil-autonomous-bear-proj/.venv/bin/python
 log() { echo "$(date '+%F %T') $*"; }
-say() { log "SAY: $*"; (cd "$T" && "$PY" say.py "$@" 2>/dev/null) || log "say failed"; }
+say() { log "(silent) $*"; }  # boot is silent: no voice cues
 log "===== boot.sh start (DRY=${DRY:-0}) ====="
 
 # 1. Audio: PipeWire session, then the paired Bluetooth speaker (SoundCore 2). Never pair anything new.
@@ -93,8 +93,17 @@ else
     say "Boot OK. No pin hunt."
 fi
 
-# 4. Network result out loud. (No Claude needed: everything above is plain bash + cron.)
+# 4. Network result, then Claude remote control so the cloud sessions can reach the Pi.
 wait $WIFI_PID
 state=$(cat "$T/.net_state" 2>/dev/null || echo OFFLINE)
 [ "$state" = ONLINE ] && say "Online." || say "Offline."
+if [ "$state" = ONLINE ]; then
+    if pgrep -f "claude rc" >/dev/null; then log "claude rc already running"
+    elif [ "${DRY:-0}" = 1 ]; then log "DRY: would start claude rc"
+    else
+        # No tmux/screen on the Pi: `script` gives claude rc the terminal it needs.
+        (cd /home/spauly && nohup setsid script -qfc "claude rc" /dev/null >"$T/claude-rc.log" 2>&1 &)
+        sleep 5; pgrep -f "claude rc" >/dev/null && log "claude rc started (log: claude-rc.log)" || log "claude rc FAILED to start (see claude-rc.log)"
+    fi
+fi
 log "===== boot.sh end ====="

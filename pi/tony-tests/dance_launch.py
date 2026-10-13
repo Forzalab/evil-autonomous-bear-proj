@@ -71,6 +71,21 @@ def on_perception(event):
 
 barnaby.app.on_perception = on_perception  # app.py calls the name it imported
 
+GEMINI_MAX = int(os.environ.get("GEMINI_MAX", "5"))  # Gemini calls per run; after that the bear just quacks
+_describe_scene, _gemini_calls = barnaby.app.describe_scene, 0
+
+
+def describe_scene(*args, **kwargs):
+    global _gemini_calls
+    if _gemini_calls >= GEMINI_MAX:
+        return "Quack quack!"
+    _gemini_calls += 1
+    print(f"[gemini] call {_gemini_calls}/{GEMINI_MAX}", file=sys.stderr, flush=True)
+    return _describe_scene(*args, **kwargs)
+
+
+barnaby.app.describe_scene = describe_scene  # app.py submits the name it imported
+
 
 def gemini_args(argv):
     """Strip --gemini; return (argv, extra flags) for this session's Gemini choice."""
