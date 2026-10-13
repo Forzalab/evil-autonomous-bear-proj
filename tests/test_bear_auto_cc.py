@@ -10,7 +10,7 @@ from test_dance_cc import STUB_HEADER
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "pi", "bear_auto.cc")
-PINS = (17, 13, 20, 26, 21)
+PINS = (17, 13, 16, 26, 21)
 
 
 def wpi_calls(stdout):
@@ -57,7 +57,7 @@ class BearAutoCcTest(unittest.TestCase):
         self.assertEqual(dirs, ["digitalWrite(26,HIGH)", "digitalWrite(21,LOW)"] * 2
                          + ["digitalWrite(26,LOW)", "digitalWrite(21,HIGH)"])
         self.assertEqual(calls.count("digitalWrite(13,HIGH)"), 400)
-        self.assertEqual(calls.count("digitalWrite(20,HIGH)"), 400)
+        self.assertEqual(calls.count("digitalWrite(16,HIGH)"), 400)
         self.assert_pins_idle_at_end(calls)
 
     def test_selftest_custom_pulse(self):
@@ -72,7 +72,7 @@ class BearAutoCcTest(unittest.TestCase):
         self.assertIn(">>> WHEELS: SKIPPED", res.stdout)
         self.assertIn(">>> RELAY: PASS", res.stdout)
         calls = wpi_calls(res.stdout)
-        for pin in (13, 20, 26, 21):
+        for pin in (13, 16, 26, 21):
             self.assertNotIn(f"digitalWrite({pin},HIGH)", calls)
 
     def test_selftest_no_relay_never_pulses(self):
@@ -94,7 +94,7 @@ class BearAutoCcTest(unittest.TestCase):
         i = calls.index("digitalWrite(17,HIGH)")
         self.assertEqual(calls[i:i + 3], ["digitalWrite(17,HIGH)", "delay(300)", "digitalWrite(17,LOW)"])
         self.assertGreaterEqual(calls.count("digitalWrite(13,HIGH)"), 200)
-        self.assertGreaterEqual(calls.count("digitalWrite(20,HIGH)"), 200)
+        self.assertGreaterEqual(calls.count("digitalWrite(16,HIGH)"), 200)
         self.assert_pins_idle_at_end(calls)
 
     def test_no_relay_no_wheels(self):

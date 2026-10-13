@@ -22,7 +22,7 @@
 #include <initializer_list>
 #include <vector>
 
-const int STEP[2] = {13, 20}, DIR[2] = {26, 21}, RELAY = 17;   // BCM
+const int STEP[2] = {13, 16}, DIR[2] = {26, 21}, RELAY = 17;   // BCM (wheel 2 STEP = 16, verified on Pi)
 const int DELAY_US = 1500, W = 320, H = 240, DIFF = 25, STREAK = 3;
 volatile sig_atomic_t stop = 0;
 void on_sig(int) { stop = 1; }
@@ -149,7 +149,7 @@ int selftest() {
         if (gpio) printf("pulse %d ms\n", opt.pulse_ms), pulse_relay(opt.pulse_ms);
         failed += result("RELAY", gpio && !stop);
     }
-    banner("STEP 3/3: WHEELS (STEP 13/20, DIR 26/21)");
+    banner("STEP 3/3: WHEELS (STEP 13/16, DIR 26/21)");
     if (!opt.wheels) puts(">>> WHEELS: SKIPPED (--no-wheels)");
     else {
         if (gpio) {
