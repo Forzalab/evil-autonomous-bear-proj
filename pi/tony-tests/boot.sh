@@ -1,6 +1,6 @@
 #!/bin/bash
-# boot.sh — run at power-on from cron (@reboot). Silent: logs only, no voice cues (the bear has no screen; check boot.log).
-# Order: bluetooth speaker → wifi by name (background) → one-shot pin hunt → claude rc if online. Silent: no voice cues.
+# boot.sh — run at power-on from cron (@reboot). Only one spoken line (greeting); everything else goes to boot.log.
+# Order: bluetooth speaker → greeting → wifi by name (background) → one-shot pin hunt → bear detection forever → claude rc if online.
 # DRY=1: no GPIO, flags kept; checks and logging still run.
 # Undo: crontab -e (delete the boot.sh line) ; rm ~/tony-tests/boot.sh
 T=/home/spauly/tony-tests
@@ -33,6 +33,9 @@ if [ -n "$dev" ] && [ -n "$idx" ] && wpctl set-profile "$dev" "$idx"; then
 else
     log "could not set speaker to a2dp (device=$dev idx=$idx)"
 fi
+
+# Boot greeting: the only spoken line at boot.
+[ "${DRY:-0}" = 1 ] && log "DRY: would greet Logan and Yousaf" || { log "SAY: greeting"; (cd "$T" && "$PY" say.py "Hi Logan! Hiiii, Yooooo-saf! Barnaby is awake." 2>/dev/null) || log "greeting failed"; }
 
 # 2. Wifi in the background: wait for wlan0, click through a guest portal (no credentials ever), log ONLINE/OFFLINE.
 WIFI_NAME=SC_GUEST  # campus: many access points share this name, so match by NAME, never by router
@@ -91,6 +94,13 @@ if [ -e "$T/RUN_PIN_HUNT" ]; then
     fi
 else
     say "Boot OK. No pin hunt."
+fi
+
+# 3b. Bear detection forever (camera → dance + yell), works offline. Skip with ~/tony-tests/NO_BEAR.
+if [ -e "$T/NO_BEAR" ]; then log "NO_BEAR set: bear detection not started"
+elif pgrep -f "tony-tests/bear_loop.sh" >/dev/null; then log "bear_loop already running"
+elif [ "${DRY:-0}" = 1 ]; then log "DRY: would start bear_loop.sh"
+else (setsid nohup "$T/bear_loop.sh" >/dev/null 2>&1 &); log "bear_loop started (log: bear_loop.log)"
 fi
 
 # 4. Network result, then Claude remote control so the cloud sessions can reach the Pi.
