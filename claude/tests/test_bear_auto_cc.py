@@ -8,8 +8,8 @@ import unittest
 
 from test_dance_cc import STUB_HEADER
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCE = os.path.join(ROOT, "pi", "bear_auto.cc")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # claude/
+SOURCE = os.path.join(ROOT, "hw", "bear_auto.cc")
 PINS = (17, 13, 16, 26, 21)
 
 

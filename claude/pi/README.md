@@ -1,5 +1,7 @@
 # tony-tests (Pi #1 snapshot)
 
+> Note: the Pi currently runs these scripts from `~/tony-tests` (paths inside them point there); this folder is the repo copy. `dance_launch.py` now lives on as `python -m claude` (see `../README.md`); `bear_loop.sh` already launches that.
+
 These are copies of `~/tony-tests` on Pi #1 (user `spauly`). They run there, not from this repo. They read McKay's checkout (`~/Desktop/barnaby/evil-autonomous-bear-proj`) and its `.venv` and never edit them.
 
 - `boot.sh`: run by cron `@reboot /bin/bash /home/spauly/tony-tests/boot.sh`, logging to `boot.log`. Its only spoken line is the greeting to Logan and Yousaf.

@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "pi", "tony-tests", "edge_test.sh")
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "pi", "edge_test.sh")
 
 EXPECTED = {
     "tap": ["open", "close", "open"],

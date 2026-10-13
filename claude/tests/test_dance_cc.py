@@ -4,8 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCE = os.path.join(ROOT, "pi", "dance.cc")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # claude/
+SOURCE = os.path.join(ROOT, "hw", "dance.cc")
 
 # Fake wiringPi: every call logs one "WPI ..." line to stdout; no hardware, no sleep.
 STUB_HEADER = r"""

@@ -1,12 +1,12 @@
-"""Run McKay's barnaby app with the tony-bear dance bridge wrapped around on_perception.
+"""Run McKay's barnaby app with the dance bridge wrapped around on_perception.
 
 On each dance fire (live or dry-run) the bear yells a canned PRETEXT line through McKay's TTS.
 Gemini scene talk is off unless --gemini is passed or you answer y at the startup prompt.
-McKay's checkout is read-only here: nothing is edited, and no .pyc files are written into it.
-Usage (from McKay's repo): .venv/bin/python ~/tony-tests/dance_launch.py [--gemini] [barnaby flags...]
+McKay's files are never edited: this module rebinds names on barnaby.app at runtime,
+and no .pyc files are written into his src/.
+Usage (from the repo root): PYTHONPATH=src python -m claude [--gemini] [barnaby flags...]
 """
 
-import importlib.util
 import os
 import random
 import sys
@@ -25,25 +25,16 @@ PRETEXT = [
 ]
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 
-HOME = Path.home()
-MCKAY_SRC = HOME / "Desktop/barnaby/evil-autonomous-bear-proj/src"
-TONY_SRC = HOME / "tony-bear/src"
+CLAUDE_DIR = Path(__file__).resolve().parent
+REPO = CLAUDE_DIR.parent
+if str(REPO / "src") not in sys.path:
+    sys.path.append(str(REPO / "src"))  # fallback if PYTHONPATH=src was forgotten
+os.environ.setdefault("BEAR_DANCE_BIN", str(CLAUDE_DIR / "pi" / "dance_sda.sh"))
 
-sys.path.insert(0, str(MCKAY_SRC))  # barnaby = McKay's (TTS + Gemini)
-sys.path.append(str(TONY_SRC))      # bear_decider = tony-bear's
-os.environ.setdefault("BEAR_DANCE_BIN", str(HOME / "tony-bear/pi/dance"))
-
-# McKay's barnaby has no trigger.py; graft tony-bear's in under barnaby's name.
-import barnaby  # noqa: E402
-
-spec = importlib.util.spec_from_file_location("barnaby.trigger", TONY_SRC / "barnaby/trigger.py")
-trigger = importlib.util.module_from_spec(spec)
-sys.modules["barnaby.trigger"] = trigger
-spec.loader.exec_module(trigger)
-
-import barnaby.app  # noqa: E402
+import barnaby.app  # noqa: E402  (McKay's, untouched)
 from barnaby import speech  # noqa: E402
-from bear_decider import bridge  # noqa: E402
+
+from claude import bridge  # noqa: E402
 
 bridge._bridge = bridge.DanceBridge(stream=sys.stderr)  # shared bridge; built here so we can see fires
 _original = barnaby.app.on_perception
@@ -98,8 +89,12 @@ def gemini_args(argv):
     return argv, ["--scene", "--scene-model", GEMINI_MODEL]
 
 
-if __name__ == "__main__":
-    argv, extra = gemini_args(sys.argv[1:])
+def main(argv=None):
+    argv, extra = gemini_args(sys.argv[1:] if argv is None else list(argv))
     gemini = bool(extra) or "--scene" in argv
     print(f"yell: pretext + gemini ({GEMINI_MODEL})" if gemini else "yell: pretext", flush=True)
     barnaby.app.main(argv + extra)
+
+
+if __name__ == "__main__":
+    main()

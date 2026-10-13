@@ -1,0 +1,10 @@
+# Built C++ binaries (see build lines at the top of each hw/*.cc)
+hw/dance
+hw/bear_auto
+hw/run_both
+hw/sos
+hw/sos_real
+hw/step_pin
+hw/wheel_test
+hw/wheel_real
+__pycache__/
