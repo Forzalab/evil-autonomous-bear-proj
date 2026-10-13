@@ -11,7 +11,8 @@ from barnaby.reactions import PerceptionEvent, on_perception
 class DebugTest(unittest.TestCase):
     def emit(self):
         out = io.StringIO()
-        with redirect_stdout(out):
+        # Stub the dance bridge: on a Pi with pi/dance built, a real event would pulse the relay.
+        with redirect_stdout(out), mock.patch("bear_decider.bridge.handle"):
             on_perception(PerceptionEvent("fist", "happy", 0.9, 0.8, 12.0, 0.7))
         return json.loads(out.getvalue())
 
