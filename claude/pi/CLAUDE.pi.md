@@ -17,14 +17,15 @@ Copy to `~/tony/CLAUDE.md`. Start Claude sessions on this Pi from `~/tony` so th
 ## Brain (shared memory) — relay only
 - This Pi has NO brain token, and must never get one. The brain is private and this Pi is shared.
 - The cloud session `session_01J1m2huF1hcF3fBHn34LbxK` is the relay. It writes only `projects/cocaine-bear/` in brain.
-- To SAVE: `send_message` to the relay with lines starting `BRAIN:` (one fact per line: date PT, what, proof/log path).
-- To READ: `send_message` to the relay with `BRAIN? <question>`. It answers from `projects/cocaine-bear/` only.
-- Send a relay message:
+- This session has no tool to message the relay. The relay reads this session's transcript instead, and the human at the Pi can paste replies too.
+- To SAVE: put lines starting `BRAIN:` in your normal reply (one fact per line: date PT, what, proof/log path).
+- To READ: write `BRAIN? <question>` in your reply. The relay answers from `projects/cocaine-bear/` only.
+- Write those lines:
   - after every lane PASS/FAIL,
   - when a hardware fact is found (pin, Vref, which edge dances, device path),
   - before any reboot,
   - at least every ~15 min while working.
-- Never send secrets (keys, `.env`, passwords, tokens) to the relay or anywhere else.
+- Never write secrets (keys, `.env`, passwords, tokens) in a reply or a log.
 
 ## Report format
 `LANE <name>: PASS|FAIL — <one line> — log: <path>`
