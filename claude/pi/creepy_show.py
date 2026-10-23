@@ -1,11 +1,11 @@
 """creepy_show.py — dance + 25 s of gremlin cackles, creepy noises and random wheel wiggles, then dance again.
 Reuses gremlin_show.py helpers. Kid-safe spooky. No camera, no Gemini. DRY=1 prints only. SEED=n repeats a run.
-Run: ~/Desktop/barnaby/evil-autonomous-bear-proj/.venv/bin/python ~/tony-tests/creepy_show.py
+Run: $PY claude/pi/creepy_show.py  (PY = the checkout's .venv python)
 """
 import os, random, subprocess, sys, tempfile, time
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / "tony-tests"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gremlin_show as g  # gremlin(), quack(), demon(), dance(), wheels(), idle_pins(), log(), speak_fx()
 
 WHISPER_FX = ["pitch", "-300", "tempo", "0.75", "tremolo", "5", "40", "reverb", "80"]

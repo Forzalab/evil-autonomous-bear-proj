@@ -6,12 +6,15 @@ import os, sys, time, signal, subprocess, tempfile, wave
 from pathlib import Path
 
 sys.dont_write_bytecode = True
-REPO = Path.home() / "Desktop/barnaby/evil-autonomous-bear-proj"
+HERE = Path(__file__).resolve().parent  # claude/pi
+REPO = HERE.parents[1]
+HW = REPO / "claude" / "hw"
+STATE = Path(os.environ.get("BEAR_HOME", REPO.parent)) / "state"
+STATE.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(REPO / "src"))
-os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
+os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 
-HERE = Path.home() / "tony-tests"
-LOG = HERE / "gremlin_show.log"
+LOG = STATE / "gremlin_show.log"
 VOICE_PATH = REPO / "voices" / "en_US-ryan-medium.onnx"
 DRY = os.environ.get("DRY") == "1"
 VOICE_ONLY = os.environ.get("VOICE_ONLY") == "1"
@@ -76,7 +79,7 @@ def dance(n):
 def wheels(which, steps, direction):
     log(f"WHEELS {which} {steps} {direction}")
     if not DRY:
-        subprocess.run([str(HERE / "wheel_test"), which, str(steps), direction], check=True, timeout=15)
+        subprocess.run([str(HW / "wheel_test"), which, str(steps), direction], check=True, timeout=15)
 
 
 def idle_pins():

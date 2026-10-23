@@ -1,10 +1,10 @@
 #!/bin/bash
 # pin_hunt.sh [BCM pins...] — announce each test (screen + voice), pulse the pin 0.7 s, wait for a human to watch the bear.
 # Phase 2 = wheels (skip with NO_WHEELS=1). Skips steppers 13 20 26 21, I2C 2 3, UART 14 15, SPI 7-11.
-PY=~/Desktop/barnaby/evil-autonomous-bear-proj/.venv/bin/python
+. "$(dirname "$0")/env.sh"
 PINS=(${@:-17 27 22 4 18 23 24 25 5 6 12 16 19})
 WHEEL_PINS=(13 20 26 21)
-say() { (cd ~/tony-tests && "$PY" say.py "$@" 2>/dev/null) || true; }
+say() { (cd "$PI" && "$PY" say.py "$@" 2>/dev/null) || true; }
 banner() { echo; echo "=================================================================="; echo "  $*"; echo "=================================================================="; }
 reset() { for p in "${PINS[@]}" "${WHEEL_PINS[@]}"; do gpio -g write $p 0 2>/dev/null; gpio -g mode $p in; done; }
 trap 'echo; banner "INTERRUPTED: all pins reset to input"; reset; exit 130' INT TERM
@@ -33,7 +33,7 @@ if [ "$NO_WHEELS" != 1 ]; then
         j=$((j+1))
         banner "PHASE 2, TEST $j of 3: $label  (wheel_test $args)"
         say "Wheel test $j of 3. $cue"; sleep 1
-        ~/tony-tests/wheel_test $args; echo ">>> WHEEL $args exit=$?"
+        "$HW/wheel_test" $args; echo ">>> WHEEL $args exit=$?"
         sleep 3
     done <<'SEQ'
 WHEEL 1 FORWARD, STEP 13 / DIR 26|wheel one, step thirteen, dir twenty-six, forward|1 200 fwd

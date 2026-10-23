@@ -1,6 +1,6 @@
 """Tests for creepy_fx (audio files only; nothing is played through the speaker).
 
-Run from ~/tony-tests:  $PY -m unittest test_creepy_fx
+Run from claude/pi:  $PY -m unittest test_creepy_fx
 """
 import os
 import random

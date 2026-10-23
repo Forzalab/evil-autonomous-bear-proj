@@ -1,7 +1,7 @@
 """Speak argv text with McKay's Piper TTS (read-only import) and wait until playback has finished."""
 import os, sys, time
 sys.dont_write_bytecode = True
-sys.path.insert(0, os.path.expanduser("~/Desktop/barnaby/evil-autonomous-bear-proj/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))  # this checkout's McKay src/
 os.environ["BARNABY_TTS"] = "1"
 from barnaby import speech
 

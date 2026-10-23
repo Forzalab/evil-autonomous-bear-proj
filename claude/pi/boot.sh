@@ -2,18 +2,17 @@
 # boot.sh — run at power-on from cron (@reboot). Only one spoken line (greeting); everything else goes to boot.log.
 # Order: bluetooth speaker → greeting → wifi by name (background) → one-shot pin hunt → bear detection forever → claude rc if online.
 # DRY=1: no GPIO, flags kept; checks and logging still run.
-# Undo: crontab -e (delete the boot.sh line) ; rm ~/tony-tests/boot.sh
-T=/home/spauly/tony-tests
+# Undo: crontab -e (delete the boot.sh line) ; rm -rf $BEAR_HOME
+. "$(dirname "$0")/env.sh"
 exec >>"$T/boot.log" 2>&1
-export HOME=/home/spauly XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 PATH="/home/spauly/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-PY=/home/spauly/Desktop/barnaby/evil-autonomous-bear-proj/.venv/bin/python
+export WAYLAND_DISPLAY=wayland-0 PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 log() { echo "$(date '+%F %T') $*"; }
 say() { log "(silent) $*"; }  # boot is silent: no voice cues
 log "===== boot.sh start (DRY=${DRY:-0}) ====="
 
 # 1. Audio: PipeWire session, then the paired Bluetooth speaker (SoundCore 2). Never pair anything new.
-for i in $(seq 60); do [ -S /run/user/1000/pipewire-0 ] && break; sleep 1; done
-[ -S /run/user/1000/pipewire-0 ] && log "pipewire up" || log "pipewire NOT up after 60 s (cues may be silent; HDMI is the only wired audio)"
+for i in $(seq 60); do [ -S $XDG_RUNTIME_DIR/pipewire-0 ] && break; sleep 1; done
+[ -S $XDG_RUNTIME_DIR/pipewire-0 ] && log "pipewire up" || log "pipewire NOT up after 60 s (cues may be silent; HDMI is the only wired audio)"
 for try in 1 2 3; do
     for mac in $(timeout 10 bluetoothctl devices Paired | awk '{print $2}'); do
         timeout 10 bluetoothctl connect "$mac" | tail -1 | sed "s/^/bt $mac: /" | while read -r l; do log "$l"; done
@@ -35,7 +34,7 @@ else
 fi
 
 # Boot greeting: the only spoken line at boot.
-[ "${DRY:-0}" = 1 ] && log "DRY: would greet Logan and Yousaf" || { log "SAY: greeting"; (cd "$T" && "$PY" say.py "Hi Logan! Hiiii, Yooooo-saf! Barnaby is awake." 2>/dev/null) || log "greeting failed"; }
+[ "${DRY:-0}" = 1 ] && log "DRY: would greet Logan and Yousaf" || { log "SAY: greeting"; (cd "$PI" && "$PY" say.py "Hi Logan! Hiiii, Yooooo-saf! Barnaby is awake." 2>/dev/null) || log "greeting failed"; }
 
 # 2. Wifi in the background: wait for wlan0, click through a guest portal (no credentials ever), log ONLINE/OFFLINE.
 WIFI_NAME=SC_GUEST  # campus: many access points share this name, so match by NAME, never by router
@@ -88,7 +87,7 @@ if [ -e "$T/RUN_PIN_HUNT" ]; then
         rm -f "$T/RUN_PIN_HUNT"; [ $wheels = yes ] && rm -f "$T/RUN_WHEELS"
         say "Boot OK. Pin hunt in ten seconds."
         sleep 10
-        if [ $wheels = yes ]; then "$T/pin_hunt.sh"; else NO_WHEELS=1 "$T/pin_hunt.sh"; fi
+        if [ $wheels = yes ]; then "$PI/pin_hunt.sh"; else NO_WHEELS=1 "$PI/pin_hunt.sh"; fi
         log "pin_hunt exit=$?"
         say "Pin hunt done."
     fi
@@ -96,11 +95,11 @@ else
     say "Boot OK. No pin hunt."
 fi
 
-# 3b. Bear detection forever (camera → dance + yell), works offline. Skip with ~/tony-tests/NO_BEAR.
+# 3b. Bear detection forever (camera → dance + yell), works offline. Skip with $T/NO_BEAR.
 if [ -e "$T/NO_BEAR" ]; then log "NO_BEAR set: bear detection not started"
-elif pgrep -f "tony-tests/bear_loop.sh" >/dev/null; then log "bear_loop already running"
+elif pgrep -f "$PI/bear_loop.sh" >/dev/null; then log "bear_loop already running"
 elif [ "${DRY:-0}" = 1 ]; then log "DRY: would start bear_loop.sh"
-else (setsid nohup "$T/bear_loop.sh" >/dev/null 2>&1 &); log "bear_loop started (log: bear_loop.log)"
+else (setsid nohup "$PI/bear_loop.sh" >/dev/null 2>&1 &); log "bear_loop started (log: bear_loop.log)"
 fi
 
 # 4. Network result, then Claude remote control so the cloud sessions can reach the Pi.
@@ -112,9 +111,9 @@ if [ "$state" = ONLINE ]; then
     elif [ "${DRY:-0}" = 1 ]; then log "DRY: would start claude rc"
     else
         # No tmux/screen on the Pi: `script` gives claude rc the terminal it needs.
-        # claude rc asks "Trust /home/spauly? [y/N]" every run (home-dir trust isn't saved): answer y after 10 s,
+        # claude rc asks "Trust $HOME? [y/N]" every run (home-dir trust isn't saved): answer y after 10 s,
         # then keep stdin open (sleep infinity) so script doesn't see EOF and close the session.
-        (cd /home/spauly && setsid bash -c '(sleep 10; printf "y\r"; sleep infinity) | script -qfc "claude rc" /dev/null' >"$T/claude-rc.log" 2>&1 &)
+        (cd "$HOME" && setsid bash -c '(sleep 10; printf "y\r"; sleep infinity) | script -qfc "claude rc" /dev/null' >"$T/claude-rc.log" 2>&1 &)
         sleep 5; pgrep -f "claude rc" >/dev/null && log "claude rc started (log: claude-rc.log)" || log "claude rc FAILED to start (see claude-rc.log)"
     fi
 fi
