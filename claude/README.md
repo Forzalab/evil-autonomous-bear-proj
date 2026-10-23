@@ -25,6 +25,8 @@ python -m claude  (claude/__main__.py, imported before main() runs)
 | path | what |
 |---|---|
 | `__main__.py` | launcher: the runtime reroute above (port of the Pi's `~/tony-tests/dance_launch.py`) |
+| `activity.py` | the ONE activity queue (dance, Gemini line, cmd): priority + arrival order, one at a time, bucket; see [`QUEUE.md`](QUEUE.md) |
+| `voice.py` | `speak_wait`: McKay's TTS, blocking until playback ends |
 | `trigger.py` | `OneShot`: one dance per shown gesture; duck-typed (event needs only `.gesture`), no barnaby import |
 | `bridge.py` | `DanceBridge`: OneShot → non-blocking spawn of `BEAR_DANCE_BIN`; dry-run if missing; never raises |
 | `hw/` | C++ for the Pi (`dance.cc`, `bear_auto.cc`, `run_both.cc`, `wheel_real.cc`, `sos_real.cc`, `step_pin.cc`) + [`hw/HARDWARE_LOG.md`](hw/HARDWARE_LOG.md) |

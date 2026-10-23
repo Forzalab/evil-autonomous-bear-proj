@@ -201,12 +201,13 @@ class WiringTest(unittest.TestCase):
     def setUp(self):
         import barnaby.app
         self.app = barnaby.app
-        saved = (barnaby.app.on_perception, barnaby.app.describe_scene, sys.dont_write_bytecode)
+        saved = (barnaby.app.on_perception, barnaby.app.on_scene_description, barnaby.app.describe_scene,
+                 sys.dont_write_bytecode)
 
         def restore():
-            barnaby.app.on_perception, barnaby.app.describe_scene, sys.dont_write_bytecode = saved
+            (barnaby.app.on_perception, barnaby.app.on_scene_description, barnaby.app.describe_scene,
+             sys.dont_write_bytecode) = saved
             sys.modules.pop("claude.__main__", None)
-            bridge_mod._bridge = None
 
         self.addCleanup(restore)
         self.original = saved[0]
@@ -217,38 +218,55 @@ class WiringTest(unittest.TestCase):
         self.launcher = importlib.import_module("claude.__main__")
 
     def test_on_perception_replaced_by_wrapper(self):
-        from barnaby.reactions import on_perception
+        from barnaby.reactions import on_perception, on_scene_description
         self.assertIs(self.original, on_perception)
         self.assertIs(self.app.on_perception, self.launcher.on_perception)
-        self.assertIsNot(self.app.on_perception, on_perception)
+        self.assertIs(self.app.on_scene_description, self.launcher.on_scene_description)
+        self.assertIsNot(self.app.on_scene_description, on_scene_description)
 
-    def test_wrapper_calls_original_then_bridge(self):
+    def test_wrapper_calls_original_then_queues_dance(self):
         from barnaby.reactions import PerceptionEvent
         event = PerceptionEvent("fist", "happy", 0.9, 0.8, 12.0)
         order = mock.Mock()
-        order.handle.return_value = False
         with mock.patch.object(self.launcher, "_original", order.original), \
-                mock.patch.object(bridge_mod, "handle", order.handle):
+                mock.patch.object(self.launcher.activities, "submit", order.submit):
             self.app.on_perception(event)
-        self.assertEqual(order.mock_calls, [mock.call.original(event), mock.call.handle(event)])
+        self.assertEqual(order.mock_calls[0], mock.call.original(event))
+        kind, pretext, duration = order.mock_calls[1].args
+        self.assertEqual((kind, duration), ("dance", self.launcher.DANCE_S))
+        self.assertIn(pretext, self.launcher.PRETEXT)
 
-    def test_fire_yells_pretext_and_original_json_still_prints(self):
+    def test_no_hand_queues_nothing(self):
+        with mock.patch.object(self.launcher, "_original"), \
+                mock.patch.object(self.launcher.activities, "submit") as submit:
+            self.app.on_perception(ev("none"))
+        submit.assert_not_called()
+
+    def test_dance_item_runs_relay_then_yells_and_json_still_prints(self):
         from barnaby.reactions import PerceptionEvent
+        from claude.activity import Item
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(self.launcher.speech, "speak") as speak, redirect_stdout(out), redirect_stderr(err), \
-                mock.patch.object(bridge_mod._bridge, "stream", err):
+        with mock.patch.object(self.launcher.activities, "submit"), redirect_stdout(out):
             self.app.on_perception(PerceptionEvent("open_palm", "neutral", 0.9, 0.9, 10.0))
         self.assertIn('"gesture": "open_palm"', out.getvalue())
+        with mock.patch.object(self.launcher.speech, "speak") as speak, redirect_stderr(err):
+            self.launcher.run(Item(1, 0, "dance", "I see you, tiny human.", 25.0))
         self.assertIn("DANCE (dry-run", err.getvalue())
-        speak.assert_called_once()
-        self.assertIn(speak.call_args.args[0], self.launcher.PRETEXT)
+        speak.assert_called_once_with("I see you, tiny human.")
 
-    def test_bridge_errors_never_escape(self):
+    def test_gemini_line_printed_and_queued_first_class(self):
+        out = io.StringIO()
+        with mock.patch.object(self.launcher.activities, "submit") as submit, redirect_stdout(out):
+            self.app.on_scene_description("a human in a hat")
+        self.assertIn("[Barnaby sees] a human in a hat", out.getvalue())
+        submit.assert_called_once_with("gemini", "a human in a hat", bucket=False)
+
+    def test_queue_errors_never_escape(self):
         with mock.patch.object(self.launcher, "_original"), \
-                mock.patch.object(bridge_mod, "handle", side_effect=RuntimeError("boom")), \
+                mock.patch.object(self.launcher.activities, "submit", side_effect=RuntimeError("boom")), \
                 redirect_stderr(io.StringIO()) as err:
             self.app.on_perception(ev("fist"))
-        self.assertIn("[dance bridge error] RuntimeError: boom", err.getvalue())
+        self.assertIn("[queue error] RuntimeError: boom", err.getvalue())
 
     def test_describe_scene_capped(self):
         real = mock.Mock(return_value="a human")
