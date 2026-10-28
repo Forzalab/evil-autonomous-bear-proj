@@ -5,7 +5,7 @@ CLI: $PY bear_voices.py demo | say VOICE "text" | random
 import random, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / "tony-tests"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gremlin_show as g
 
 # Legibility EQ added to every voice: cut rumble/mud below 150 Hz, boost speech presence at 3 kHz, tame harsh highs.

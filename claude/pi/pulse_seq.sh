@@ -1,16 +1,14 @@
 #!/bin/bash
 # pulse_seq.sh [COUNTxMS[@GAP] ...] — sequential relay tests on BCM17 to find which pulses make the bear dance.
-# Each test: banner + spoken "Test N of M" → pulse(s) via ~/tony-bear/pi/dance → wait GAP s (default 25, Try Me lockout ~22 s).
+# Each test: banner + spoken "Test N of M" → pulse(s) via claude/hw/dance → wait GAP s (default 25, Try Me lockout ~22 s).
 # COUNTxMS = COUNT pulses of MS ms, MS apart. @GAP = seconds to wait BEFORE this test. DRY=1 = no GPIO.
-# Relay only: no wheels, no camera. Log: ~/tony-tests/pulse_seq.log
-T=/home/spauly/tony-tests
-PY=/home/spauly/Desktop/barnaby/evil-autonomous-bear-proj/.venv/bin/python
-DANCE=/home/spauly/tony-bear/pi/dance
-export XDG_RUNTIME_DIR=/run/user/1000
+# Relay only: no wheels, no camera. Log: $T/pulse_seq.log
+. "$(dirname "$0")/env.sh"
+DANCE=$HW/dance
 TESTS=(${@:-1x1500 1x1000 1x1200 1x2000 1x3000 2x300 3x500 1x1500 1x1500 1x1500@10})
 exec > >(tee -a "$T/pulse_seq.log") 2>&1
 log() { echo "$(date '+%T') $*"; }
-say() { (cd "$T" && "$PY" say.py "$@" 2>/dev/null) || true; }
+say() { (cd "$PI" && "$PY" say.py "$@" 2>/dev/null) || true; }
 banner() { echo; echo "=================================================================="; echo "  $*"; echo "=================================================================="; }
 release() { pinctrl set 17 ip pd 2>/dev/null; }
 trap 'echo; banner "INTERRUPTED: pin 17 back to input"; release; exit 130' INT TERM

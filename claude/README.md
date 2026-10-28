@@ -25,6 +25,8 @@ python -m claude  (claude/__main__.py, imported before main() runs)
 | path | what |
 |---|---|
 | `__main__.py` | launcher: the runtime reroute above (port of the Pi's `~/tony-tests/dance_launch.py`) |
+| `activity.py` | the ONE activity queue (dance, Gemini line, cmd): priority + arrival order, one at a time, bucket; see [`QUEUE.md`](QUEUE.md) |
+| `voice.py` | `speak_wait`: McKay's TTS, blocking until playback ends |
 | `trigger.py` | `OneShot`: one dance per shown gesture; duck-typed (event needs only `.gesture`), no barnaby import |
 | `bridge.py` | `DanceBridge`: OneShot → non-blocking spawn of `BEAR_DANCE_BIN`; dry-run if missing; never raises |
 | `hw/` | C++ for the Pi (`dance.cc`, `bear_auto.cc`, `run_both.cc`, `wheel_real.cc`, `sos_real.cc`, `step_pin.cc`) + [`hw/HARDWARE_LOG.md`](hw/HARDWARE_LOG.md) |
@@ -46,12 +48,12 @@ PYTHONPATH=src .venv/bin/python -m claude --check                # verify models
 - Env: `BEAR_DANCE_BIN` (dance command; default `claude/pi/dance_sda.sh`), `GEMINI_MAX` (default 5),
   `BARNABY_TTS=1` to hear yells (McKay's speech worker), `SDA_OFF_S` (relay-off blip, default 0.3 s).
 - If `BEAR_DANCE_BIN` doesn't exist the bridge prints `DANCE (dry-run: ...)` to stderr and still yells.
-- On the Pi, `pi/bear_loop.sh` (started by `pi/boot.sh` from cron) runs it forever: `python -u -m claude --source 0`, restart on crash, log `~/tony-tests/bear_loop.log`.
+- On the Pi, `pi/bear_loop.sh` (started by `pi/boot.sh` from cron) runs it forever: `python -u -m claude --source 0`, restart on crash, log `~/tony/state/bear_loop.log` (layout: [`pi/README.md`](pi/README.md)).
 
 ## Stop
 
 - Foreground: `Q` in the preview window, or Ctrl-C.
-- Forever loop on the Pi: `touch ~/tony-tests/NO_BEAR; pkill -f 'python -u -m claude'`. Resume: `rm ~/tony-tests/NO_BEAR` and run `claude/pi/bear_loop.sh`.
+- Forever loop on the Pi: `touch ~/tony/state/NO_BEAR; pkill -f 'python -u -m claude'`. Resume: `rm ~/tony/state/NO_BEAR` and run `claude/pi/bear_loop.sh`.
 
 ## Test
 

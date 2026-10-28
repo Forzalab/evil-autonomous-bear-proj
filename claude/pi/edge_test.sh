@@ -12,7 +12,7 @@
 #         GAP=25    seconds between tests (Try Me lockout ~22 s); not scaled
 #         DRY=1     no GPIO, no voice: print only ("(dry) close/open")
 #         SCALE=1   multiplies every hold duration (tests use 0.01)
-#         LOG=...   log file (default ~/tony-tests/edge_test.log, appended)
+#         LOG=...   log file (default $T/edge_test.log, appended)
 # Every edge prints "HH:MM:SS.mmm EDGE close|open" so "bear started at X" can be matched to an edge.
 #
 # Tests (each starts from a defined state held 3 s so a previous edge cannot leak in):
@@ -42,11 +42,10 @@ SIG=${SIG:-2}
 GAP=${GAP:-25}
 SCALE=${SCALE:-1}
 DRY=${DRY:-0}
-LOG=${LOG:-$HOME/tony-tests/edge_test.log}
 DIR=$(cd "$(dirname "$0")" && pwd)
-PY=${PY:-/home/spauly/Desktop/barnaby/evil-autonomous-bear-proj/.venv/bin/python}
+. "$DIR/env.sh"
+LOG=${LOG:-$T/edge_test.log}
 [ -x "$PY" ] || PY=python3
-export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
 
 if ! [[ $SIG =~ ^[0-9]+$ ]] || [ "$SIG" -le 1 ] || [ "$SIG" -gt 27 ]; then
     echo "edge_test: refusing SIG=$SIG (must be BCM 2..27; 0/1 are the HAT EEPROM pins)" >&2; exit 2
